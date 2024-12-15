@@ -1,9 +1,9 @@
-#define SDL_MAIN_USE_CALLBACKS 1
+#include "line.h"
+#include <chalk-board.h>
 
 #include <stdlib.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_init.h>
-#include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_render.h>
@@ -18,77 +18,45 @@
 #include <SDL3/SDL_rect.h>
 #include <SDL3/SDL_timer.h>
 #include <SDL3/SDL_video.h>
-
 #include <stdbool.h>
 
-enum e_Pos {
-    POS_X,
-    POS_Y,
-    POS__MAX__
-};
+#define WIDTH 1920
+#define HEIGHT 1080
 
-enum e_ChalkColor {
-    WHITE,
-    RED,
-    BLUE,
-    GREEN,
-    YELLOW,
-    PINK,
-    ORANGE,
-    COLOR__MAX__
-};
-
-void white_chalk(SDL_Renderer * r, Uint8 alpha)
+void white_chalk(SDL_Renderer * r, float alpha)
 {
     SDL_SetRenderDrawColorFloat(r, 1.0f, 1.0f, 1.0f, alpha);
 }
 
-void red_chalk(SDL_Renderer * r, Uint8 alpha)
+void red_chalk(SDL_Renderer * r, float alpha)
 {
     SDL_SetRenderDrawColorFloat(r, 1.0f, 0, 0, alpha);
 }
 
-void blue_chalk(SDL_Renderer * r, Uint8 alpha)
+void blue_chalk(SDL_Renderer * r, float alpha)
 {
     SDL_SetRenderDrawColorFloat(r, 0, 0, 1.0f, alpha);
 }
 
-void green_chalk(SDL_Renderer * r, Uint8 alpha)
+void green_chalk(SDL_Renderer * r, float alpha)
 {
     SDL_SetRenderDrawColorFloat(r, 0, 1.0f, 0, alpha);
 }
 
-void yellow_chalk(SDL_Renderer * r, Uint8 alpha)
+void yellow_chalk(SDL_Renderer * r, float alpha)
 {
     SDL_SetRenderDrawColorFloat(r, 1.0f, 1.0f, 0, alpha);
 }
 
-void pink_chalk(SDL_Renderer * r, Uint8 alpha)
+void pink_chalk(SDL_Renderer * r, float alpha)
 {
     SDL_SetRenderDrawColorFloat(r, 1.0f, 0.713f, 0.756f, alpha);
 }
 
-void orange_chalk(SDL_Renderer * r, Uint8 alpha)
+void orange_chalk(SDL_Renderer * r, float alpha)
 {
     SDL_SetRenderDrawColorFloat(r, 1.0f, 0.647f, 0.0f, alpha);
 }
-
-struct s_App {
-    SDL_Window * window;
-    SDL_Renderer * renderer;
-    SDL_Texture * renderer_target;
-    SDL_Texture * erase_texture;
-    enum e_ChalkColor color;
-    bool touching;
-    bool fullscreen;
-    bool erase;
-    bool updated;
-    float thickness;
-    float pressure;
-    float position[POS__MAX__];
-    float previous_position[POS__MAX__];
-    void (*chalk[COLOR__MAX__])(SDL_Renderer * r, Uint8 alpha);
-};
 
 SDL_AppResult SDL_AppInit(void ** appstate, int argc, char ** argv)
 {
@@ -124,18 +92,18 @@ SDL_AppResult SDL_AppInit(void ** appstate, int argc, char ** argv)
         return SDL_APP_FAILURE;
     }
 
-    if (!SDL_CreateWindowAndRenderer("BBoard", 1920, 1080, 0, &app->window, &app->renderer)) {
+    if (!SDL_CreateWindowAndRenderer("BBoard", WIDTH, HEIGHT, 0, &app->window, &app->renderer)) {
         SDL_Log("Window and renderer failed <%s>", SDL_GetError());
         return SDL_APP_FAILURE;
     }
 
-    app->renderer_target = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, 1920, 1080);
+    app->renderer_target = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, WIDTH, HEIGHT);
     if (!app->renderer_target) {
         SDL_Log("Failed Create texture target <%s>", SDL_GetError());
         return SDL_APP_FAILURE;
     }
     
-    app->erase_texture = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, 1920, 1080);
+    app->erase_texture = SDL_CreateTexture(app->renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, WIDTH, HEIGHT);
     if (!app->erase_texture) {
         SDL_Log("Failed Create texture target <%s>", SDL_GetError());
         return SDL_APP_FAILURE;
@@ -161,15 +129,6 @@ SDL_AppResult SDL_AppInit(void ** appstate, int argc, char ** argv)
 }
 
 
-/* Xiaolin Wu's line algorithm */
-
-static float modf_var = 0.0f;
-#define ipart(x)    SDL_floorf(x)
-#define round(x)    ipart(x + 0.5f)
-#define rfpart(x)   (1.0f - SDL_modff(x, &modf_var))
-#define fpart(x)    (SDL_modff(x, &modf_var))
-
-
 static inline void swap(float * a, float * b) {
     float x = *a;
     *a = *b;
@@ -183,7 +142,16 @@ void clear_erase_texture(struct s_App * app) {
     app->updated = false;
 }
 
-void draw_thick_line(struct s_App * app, float x0, float y0, float x1, float y1)
+void draw_thick_line (
+    struct s_App * app,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float thick,
+    float press,
+    void (*chalk)(SDL_Renderer * r, float alpha)
+)
 {
     if (x0 > x1) {
         swap(&x0, &x1);
@@ -191,9 +159,9 @@ void draw_thick_line(struct s_App * app, float x0, float y0, float x1, float y1)
     }
 
     SDL_SetRenderTarget(app->renderer, app->renderer_target);
-    const float thickness = app->thickness;
+    const float thickness = thick;
     do {
-        float p = app->pressure / thickness;
+        float p = press / thickness;
         for (float t = thickness; t > 0.0f; t -= (thickness / 3.0f) * (float)(rand() / (float)RAND_MAX)) {
             p += p;
             for (float alpha = 0.0; alpha <= SDL_PI_F * 2; alpha += (float)(rand() / (float)RAND_MAX)) {
@@ -203,7 +171,7 @@ void draw_thick_line(struct s_App * app, float x0, float y0, float x1, float y1)
                 
                 xbis0 += (float)(rand() / (float)RAND_MAX) * t;
                 ybis0 += (float)(rand() / (float)RAND_MAX) * t;
-                app->chalk[app->color](app->renderer, (float)(rand() / (float)RAND_MAX) * p);
+                chalk(app->renderer, (float)(rand() / (float)RAND_MAX) * p);
                 SDL_RenderPoint(app->renderer, xbis0, ybis0);
             }
         }
@@ -217,9 +185,46 @@ void draw_thick_line(struct s_App * app, float x0, float y0, float x1, float y1)
         x0 = x0 + (hypo / thickness) * SDL_cosf(angle);
         y0 = y0 + (hypo / thickness) * SDL_sinf(angle);
     } while (1);
-  
 }
 
+void draw_last_point (struct s_App * app, struct s_Line * line)
+{
+    draw_thick_line(
+            app,
+            line->points[line->last_point - 1].x,
+            line->points[line->last_point - 1].y,
+            line->points[line->last_point].x,
+            line->points[line->last_point].y,
+            line->thickness,
+            line->points[line->last_point - 1].pressure + line->points[line->last_point].pressure / 2,
+            line->chalk
+        );
+}
+
+void draw_line(struct s_App * app, struct s_Line * line)
+{
+    struct s_Point * previous = NULL;
+    srand(line->rand_init);
+    if (line->points == NULL || line->allocated <= 1) { return; }
+    if (!line->points[0].used) { return; }
+
+    previous = &line->points[0];
+    for (size_t i = 1; i < line->allocated; i++) {
+        if (!line->points[i].used) { break; }
+        draw_thick_line(
+            app,
+            previous->x,
+            previous->y,
+            line->points[i].x,
+            line->points[i].y,
+            line->thickness,
+            previous->pressure + line->points[i].pressure / 2,
+            line->chalk
+        );
+        previous = &line->points[i];
+
+    }
+}
 
 
 SDL_AppResult SDL_AppEvent(void * appstate, SDL_Event * event)
@@ -362,6 +367,15 @@ SDL_AppResult SDL_AppEvent(void * appstate, SDL_Event * event)
                     app->updated = false;
                     break;
                 }
+                case SDLK_F12: {
+                    for (size_t i = 0; i < app->allocated; i++) {
+                        if (!app->lines[i].used) {
+                            break;
+                        }
+
+                        draw_line(app, &app->lines[i]);
+                    }
+                }
             }
             break;
         }
@@ -393,8 +407,13 @@ SDL_AppResult SDL_AppEvent(void * appstate, SDL_Event * event)
             }
             if (app->pressure <= 0.0f) { break; }
             if (app->previous_position[POS_X] >= 0.0f && app->touching) {
-                SDL_SetRenderTarget(app->renderer, app->renderer_target);
-                draw_thick_line(app, app->previous_position[POS_X], app->previous_position[POS_Y], event->pmotion.x, event->pmotion.y);
+                add_point_to_line(
+                    app->current_line,
+                    event->pmotion.x,
+                    event->pmotion.y,
+                    app->pressure
+                );
+                draw_last_point (app, app->current_line);
                 app->updated = false;
             }
             app->previous_position[POS_X] = event->pmotion.x;
@@ -404,11 +423,28 @@ SDL_AppResult SDL_AppEvent(void * appstate, SDL_Event * event)
 
         case SDL_EVENT_PEN_DOWN: {
             app->touching = true;
-            app->previous_position[POS_X] = event->pmotion.x;
-            app->previous_position[POS_Y] = event->pmotion.y;
+            app->current_line = get_next_line(app);
+            app->current_line->thickness = app->thickness;
+            app->current_line->chalk = app->chalk[app->color];
+            if (!add_point_to_line(
+                app->current_line,
+                event->pmotion.x,
+                event->pmotion.y,
+                app->pressure
+            )) {
+                SDL_Log("Failed addition of point");
+            }
+            srand(app->current_line->rand_init);
             break;
         }
         case SDL_EVENT_PEN_UP: {
+            if (app->touching) {
+#ifdef DEBUG
+                SDL_Log("Line with %ld allocated points", app->current_line->allocated);
+#endif
+                app->current_line = NULL;
+        
+            }
             app->touching = false;
         }
 
@@ -426,7 +462,7 @@ SDL_AppResult SDL_AppEvent(void * appstate, SDL_Event * event)
 SDL_AppResult SDL_AppIterate(void * appstate) 
 {
     struct s_App * app = appstate;
-    if (app->updated) { SDL_Delay(5); return SDL_APP_CONTINUE; }
+    //if (app->updated) { SDL_Delay(5); return SDL_APP_CONTINUE; }
 
     SDL_SetRenderTarget(app->renderer, NULL);
     SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
@@ -444,5 +480,6 @@ void SDL_AppQuit(void * appstate, SDL_AppResult result)
 {
     struct s_App * app = appstate;
     SDL_DestroyTexture(app->renderer_target);
+    free_lines(app);
     free(app);
 } 
