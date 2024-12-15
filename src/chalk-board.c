@@ -226,6 +226,63 @@ void draw_line(struct s_App * app, struct s_Line * line)
     }
 }
 
+void handle_motion (struct s_App * app, float x, float y, float pressure)
+{
+    if (app->erase) {
+        SDL_FRect rect = {
+            .x = x - app->thickness * 10 / 2 + 1,
+            .y = y - app->thickness * 10 / 2 + 1,
+            .w = app->thickness * 10 + 1,
+            .h = app->thickness * 10 + 1
+        };
+        SDL_SetRenderTarget(app->renderer, app->erase_texture);
+        SDL_SetRenderDrawColor(app->renderer, 127, 127, 127, SDL_ALPHA_TRANSPARENT);
+        SDL_RenderClear(app->renderer);
+        SDL_SetRenderDrawColorFloat(app->renderer, 0.5f, 0.5f, 0.5f, SDL_ALPHA_OPAQUE);
+        SDL_RenderRect(app->renderer, &rect);
+        if (app->touching) {
+            rect.x--;
+            rect.y--;
+            rect.w--;
+            rect.h--;
+            SDL_SetRenderTarget(app->renderer, app->renderer_target);
+            SDL_SetRenderDrawColorFloat(app->renderer, 0.0f, 0.0f, 0.0f, SDL_ALPHA_OPAQUE);
+            SDL_RenderFillRect(app->renderer, &rect);
+        }
+        app->updated = false;
+        return;
+    }
+    if (pressure <= 0.0f) { return; }
+    if (app->previous_position[POS_X] >= 0.0f && app->touching) {
+        add_point_to_line(
+            app->current_line,
+            x,
+            y,
+            pressure
+        );
+        draw_last_point (app, app->current_line);
+        app->updated = false;
+    }
+    app->previous_position[POS_X] = x;
+    app->previous_position[POS_Y] = y;    
+}
+
+void handle_down(struct s_App * app, float x, float y, float pressure)
+{
+    app->touching = true;
+    app->current_line = get_next_line(app);
+    app->current_line->thickness = app->thickness;
+    app->current_line->chalk = app->chalk[app->color];
+    if (!add_point_to_line(
+        app->current_line,
+        x,
+        y,
+        pressure
+    )) {
+        SDL_Log("Failed addition of point");
+    }
+    srand(app->current_line->rand_init);
+}
 
 SDL_AppResult SDL_AppEvent(void * appstate, SDL_Event * event)
 {
@@ -380,72 +437,44 @@ SDL_AppResult SDL_AppEvent(void * appstate, SDL_Event * event)
             break;
         }
 
+        case SDL_EVENT_MOUSE_MOTION: {
+            handle_motion(app, event->motion.x, event->motion.y, 1.0f);
+            break;
+        }
         case SDL_EVENT_PEN_MOTION : {
-            if (app->erase) {
-                SDL_FRect rect = {
-                    .x = event->pmotion.x - app->thickness * 10 / 2 + 1,
-                    .y =  event->pmotion.y - app->thickness * 10 / 2 + 1,
-                    .w = app->thickness * 10 + 1,
-                    .h = app->thickness * 10 + 1
-                };
-                SDL_SetRenderTarget(app->renderer, app->erase_texture);
-                SDL_SetRenderDrawColor(app->renderer, 127, 127, 127, SDL_ALPHA_TRANSPARENT);
-                SDL_RenderClear(app->renderer);
-                SDL_SetRenderDrawColorFloat(app->renderer, 0.5f, 0.5f, 0.5f, SDL_ALPHA_OPAQUE);
-                SDL_RenderRect(app->renderer, &rect);
-                if (app->touching) {
-                    rect.x--;
-                    rect.y--;
-                    rect.w--;
-                    rect.h--;
-                    SDL_SetRenderTarget(app->renderer, app->renderer_target);
-                    SDL_SetRenderDrawColorFloat(app->renderer, 0.0f, 0.0f, 0.0f, SDL_ALPHA_OPAQUE);
-                    SDL_RenderFillRect(app->renderer, &rect);
-                }
-                app->updated = false;
-                break;
-            }
-            if (app->pressure <= 0.0f) { break; }
-            if (app->previous_position[POS_X] >= 0.0f && app->touching) {
-                add_point_to_line(
-                    app->current_line,
-                    event->pmotion.x,
-                    event->pmotion.y,
-                    app->pressure
-                );
-                draw_last_point (app, app->current_line);
-                app->updated = false;
-            }
-            app->previous_position[POS_X] = event->pmotion.x;
-            app->previous_position[POS_Y] = event->pmotion.y;
+            handle_motion(app, event->pmotion.x, event->pmotion.y, app->pressure);
             break;
         }
 
-        case SDL_EVENT_PEN_DOWN: {
-            app->touching = true;
-            app->current_line = get_next_line(app);
-            app->current_line->thickness = app->thickness;
-            app->current_line->chalk = app->chalk[app->color];
-            if (!add_point_to_line(
-                app->current_line,
-                event->pmotion.x,
-                event->pmotion.y,
-                app->pressure
-            )) {
-                SDL_Log("Failed addition of point");
+        case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+            if (event->button.button == SDL_BUTTON_LEFT) {
+                handle_down(app, event->button.x, event->button.y, 1.0f);
             }
-            srand(app->current_line->rand_init);
+            break;
+        }
+
+        case SDL_EVENT_MOUSE_BUTTON_UP: {
+            if (event->button.button == SDL_BUTTON_LEFT) {
+                if (app->touching) {
+                    app->current_line = NULL;
+
+                }
+                app->touching = false;
+            }
+        break;
+        }
+
+        case SDL_EVENT_PEN_DOWN: {
+            handle_down(app, event->pmotion.x, event->pmotion.y, app->pressure);
             break;
         }
         case SDL_EVENT_PEN_UP: {
             if (app->touching) {
-#ifdef DEBUG
-                SDL_Log("Line with %ld allocated points", app->current_line->allocated);
-#endif
                 app->current_line = NULL;
         
             }
             app->touching = false;
+            break;
         }
 
         case SDL_EVENT_PEN_AXIS: {
