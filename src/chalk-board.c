@@ -142,53 +142,52 @@ void clear_erase_texture(struct s_App * app) {
     app->updated = false;
 }
 
+#ifndef EULER
+#define EULER 2.71828f
+#endif /* EULER */
+
+#ifndef PI_2
+#define PI_2 6.2832f
+#endif  /* PI_2 */
+
 void draw_thick_line (
     struct s_App * app,
     float x0,
     float y0,
     float x1,
     float y1,
-    float thick,
-    float press,
+    float thickness,
+    float pressure,
     void (*chalk)(SDL_Renderer * r, float alpha)
-)
+)   
 {
+    SDL_FPoint * all_points = NULL;
     if (x0 > x1) {
         swap(&x0, &x1);
         swap(&y0, &y1);
     }
 
-    SDL_SetRenderTarget(app->renderer, app->renderer_target);
-    const float thickness = thick;
-    do {
-        float p = press / thickness;
-        for (float t = thickness; t > 0.0f; t -= (thickness / 3.0f) * (float)(rand() / (float)RAND_MAX)) {
-            p += p;
-            for (float alpha = 0.0; alpha <= SDL_PI_F * 2; alpha += (float)(rand() / (float)RAND_MAX)) {
-
-                float xbis0 = x0 +  t * SDL_cosf(alpha);
-                float ybis0 = y0 + t  * SDL_sinf(alpha);
-                
-                xbis0 += (float)(rand() / (float)RAND_MAX) * t;
-                ybis0 += (float)(rand() / (float)RAND_MAX) * t;
-                chalk(app->renderer, (float)(rand() / (float)RAND_MAX) * p);
-                SDL_RenderPoint(app->renderer, xbis0, ybis0);
-            }
+    all_points = calloc((int)6.2832f * thickness, sizeof(*all_points));
+    if (all_points == NULL) {
+        return;
+    }
+    const int points = (int)PI_2 * thickness;
+    const float alpha_step = PI_2 / points;
+    for (int t = thickness; t > 0 ; t--) {
+        float alpha = 0.f;
+        for (int i = 0; i < points; i++) {
+            all_points[i] = (SDL_FPoint){ x0 + t *  SDL_cosf(alpha),  y0 + t * SDL_sinf(alpha)};
+            alpha += alpha_step;
         }
-        float dx = x1 - x0;
-        float dy = y1 - y0;
-        float hypo = SDL_sqrtf(dx * dx + dy * dy);
-        if (thickness / 2 > hypo) {
-            break;
-        }
-        float angle = SDL_atan2f(dy, dx);
-        x0 = x0 + (hypo / thickness) * SDL_cosf(angle);
-        y0 = y0 + (hypo / thickness) * SDL_sinf(angle);
-    } while (1);
+        chalk(app->renderer,  SDL_powf(EULER ,-SDL_powf(t / thickness, 2)));
+        SDL_RenderPoints(app->renderer, all_points, points);
+    }
+    free(all_points);
 }
 
 void draw_last_point (struct s_App * app, struct s_Line * line)
 {
+    SDL_SetRenderTarget(app->renderer, app->renderer_target);
     draw_thick_line(
             app,
             line->points[line->last_point - 1].x,
@@ -196,7 +195,7 @@ void draw_last_point (struct s_App * app, struct s_Line * line)
             line->points[line->last_point].x,
             line->points[line->last_point].y,
             line->thickness,
-            line->points[line->last_point - 1].pressure + line->points[line->last_point].pressure / 2,
+            (line->points[line->last_point - 1].pressure + line->points[line->last_point].pressure) / 2,
             line->chalk
         );
 }
@@ -208,6 +207,7 @@ void draw_line(struct s_App * app, struct s_Line * line)
     if (line->points == NULL || line->allocated <= 1) { return; }
     if (!line->points[0].used) { return; }
 
+    SDL_SetRenderTarget(app->renderer, app->renderer_target);
     previous = &line->points[0];
     for (size_t i = 1; i < line->allocated; i++) {
         if (!line->points[i].used) { break; }
@@ -218,11 +218,10 @@ void draw_line(struct s_App * app, struct s_Line * line)
             line->points[i].x,
             line->points[i].y,
             line->thickness,
-            previous->pressure + line->points[i].pressure / 2,
+            (previous->pressure + line->points[i].pressure) / 2,
             line->chalk
         );
         previous = &line->points[i];
-
     }
 }
 
